@@ -10,9 +10,9 @@
 			"type": "extensionHost",
 			"request": "launch",
 			"args": [
-				"--new-window",
-				"--extensionDevelopmentPath=${workspaceFolder}"
-			],
+    "--extensionDevelopmentPath=${workspaceFolder}",
+    "--folder-uri=file:///Users/sajith/Documents/UOM/APR_TEST_FOLDER"
+],
 			"outFiles": [
 				"${workspaceFolder}/out/**/*.js"
 			],

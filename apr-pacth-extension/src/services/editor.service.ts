@@ -11,6 +11,42 @@ export interface EditorSelectionData {
 	range: vscode.Range;
 }
 
+function buildSelectionData(
+	document: vscode.TextDocument,
+	range: vscode.Range,
+	selectedText: string,
+): EditorSelectionData | undefined {
+	if (!selectedText.trim()) {
+		return undefined;
+	}
+
+	const startLine = range.start.line;
+	const endLine = range.end.line;
+
+	const contextBefore = collectLines(
+		document,
+		Math.max(0, startLine - 3),
+		Math.max(0, startLine - 1),
+	);
+
+	const contextAfter = collectLines(
+		document,
+		Math.min(document.lineCount - 1, endLine + 1),
+		Math.min(document.lineCount - 1, endLine + 3),
+	);
+
+	return {
+		fileName: document.fileName.split(/[\\/]/).pop() ?? "unknown",
+		language: document.languageId,
+		startLine,
+		endLine,
+		selectedText,
+		contextBefore,
+		contextAfter,
+		range,
+	};
+}
+
 function collectLines(
 	document: vscode.TextDocument,
 	startLine: number,
@@ -41,44 +77,47 @@ export function getSelectionData(
 		return undefined;
 	}
 
-	const selectedText = document.getText(selection);
-	if (!selectedText.trim()) {
-		return undefined;
-	}
-
-	const startLine = selection.start.line;
-	const endLine = selection.end.line;
-
-	const contextBefore = collectLines(
-		document,
-		Math.max(0, startLine - 3),
-		Math.max(0, startLine - 1),
+	return getSelectionDataForRange(
+		editor,
+		new vscode.Range(selection.start, selection.end),
 	);
+}
 
-	const contextAfter = collectLines(
-		document,
-		Math.min(document.lineCount - 1, endLine + 1),
-		Math.min(document.lineCount - 1, endLine + 3),
+export function getSelectionDataForRange(
+	editor: vscode.TextEditor,
+	range: vscode.Range,
+): EditorSelectionData | undefined {
+	return buildSelectionData(
+		editor.document,
+		range,
+		editor.document.getText(range),
 	);
+}
 
-	return {
-		fileName: document.fileName.split(/[\\/]/).pop() ?? "unknown",
-		language: document.languageId,
-		startLine,
-		endLine,
-		selectedText,
-		contextBefore,
-		contextAfter,
-		range: new vscode.Range(selection.start, selection.end),
-	};
+export async function getSelectionDataForDocumentRange(
+	documentUri: vscode.Uri,
+	range: vscode.Range,
+): Promise<EditorSelectionData | undefined> {
+	const document = await vscode.workspace.openTextDocument(documentUri);
+	return buildSelectionData(document, range, document.getText(range));
 }
 
 export async function applyPatchToSelection(
-	editor: vscode.TextEditor,
+	documentUri: vscode.Uri,
 	range: vscode.Range,
 	patchedText: string,
-): Promise<boolean> {
-	return editor.edit((editBuilder) => {
-		editBuilder.replace(range, patchedText);
-	});
+) : Promise<vscode.Range | undefined> {
+	const document = await vscode.workspace.openTextDocument(documentUri);
+	const startOffset = document.offsetAt(range.start);
+	const edit = new vscode.WorkspaceEdit();
+	edit.replace(documentUri, range, patchedText);
+	const applied = await vscode.workspace.applyEdit(edit);
+
+	if (!applied) {
+		return undefined;
+	}
+
+	const updatedDocument = await vscode.workspace.openTextDocument(documentUri);
+	const endPosition = updatedDocument.positionAt(startOffset + patchedText.length);
+	return new vscode.Range(range.start, endPosition);
 }

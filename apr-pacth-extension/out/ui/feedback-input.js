@@ -35,10 +35,22 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getNaturalLanguageFeedback = getNaturalLanguageFeedback;
 const vscode = __importStar(require("vscode"));
-async function getNaturalLanguageFeedback() {
+function buildPrompt(options) {
+    if (options?.testFailureOutput) {
+        return `Tests failed after attempt ${options.attempt}. Describe how the next patch should change.`;
+    }
+    return "Describe what is wrong and what the patch should do";
+}
+function buildPlaceHolder(options) {
+    if (options?.testFailureOutput) {
+        return `Previous failure: ${options.testFailureOutput}`;
+    }
+    return "Example: Need to also handle empty dataset";
+}
+async function getNaturalLanguageFeedback(options) {
     return vscode.window.showInputBox({
-        prompt: "Describe what is wrong and what the patch should do",
-        placeHolder: "Example: Need to also handle empty dataset",
+        prompt: buildPrompt(options),
+        placeHolder: buildPlaceHolder(options),
         ignoreFocusOut: true,
         validateInput: (value) => {
             if (!value.trim()) {

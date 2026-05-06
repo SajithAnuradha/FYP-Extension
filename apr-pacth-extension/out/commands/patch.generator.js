@@ -38,8 +38,38 @@ const vscode = __importStar(require("vscode"));
 const api_client_service_1 = require("../services/api.client.service");
 const editor_service_1 = require("../services/editor.service");
 const request_builder_service_1 = require("../services/request-builder.service");
+const test_runner_service_1 = require("../services/test-runner.service");
 const feedback_input_1 = require("../ui/feedback-input");
 const notification_1 = require("../ui/notification");
+function formatFailureForFeedback(testOutput) {
+    const normalized = testOutput.trim();
+    if (!normalized) {
+        return "The test command failed without output.";
+    }
+    if (normalized.length <= 500) {
+        return normalized;
+    }
+    return `...${normalized.slice(-500)}`;
+}
+function buildFeedback(userFeedback, testFailureOutput) {
+    if (!testFailureOutput) {
+        return userFeedback;
+    }
+    return [
+        userFeedback,
+        "",
+        "Latest failing test output:",
+        testFailureOutput,
+    ].join("\n");
+}
+function buildFailureMessage(attempt, maxAttempts, testResultOutput, exitCode) {
+    const summary = formatFailureForFeedback(testResultOutput);
+    return [
+        `Attempt ${attempt} of ${maxAttempts}: tests failed.`,
+        `Exit code: ${exitCode ?? "unknown"}.`,
+        summary,
+    ].join(" ");
+}
 async function generatePatchCommand() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
@@ -51,30 +81,73 @@ async function generatePatchCommand() {
         (0, notification_1.showError)("Please select the buggy line or code range first.");
         return;
     }
-    const feedback = await (0, feedback_input_1.getNaturalLanguageFeedback)();
-    if (!feedback) {
+    const documentUri = editor.document.uri;
+    const testExecutionConfig = await (0, test_runner_service_1.getTestExecutionConfig)(editor.document.uri);
+    if (!testExecutionConfig) {
         (0, notification_1.showError)("Patch generation cancelled.");
         return;
     }
+    const initialFeedback = await (0, feedback_input_1.getNaturalLanguageFeedback)();
+    if (!initialFeedback) {
+        (0, notification_1.showError)("Patch generation cancelled.");
+        return;
+    }
+    let feedback = initialFeedback;
+    const maxAttempts = (0, test_runner_service_1.getMaxPatchAttempts)();
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
-        title: "Generating patch...",
+        title: "Generating patch and validating tests...",
         cancellable: false,
-    }, async () => {
+    }, async (progress) => {
         try {
-            const payload = (0, request_builder_service_1.buildGeneratePatchRequest)(selectionData, feedback);
-            const response = await (0, api_client_service_1.requestPatch)(payload);
-            if (!response.patches.length) {
-                (0, notification_1.showError)("No patch candidates were returned by the backend.");
-                return;
+            let currentRange = selectionData.range;
+            let lastFailureOutput;
+            for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+                progress.report({
+                    message: `Attempt ${attempt} of ${maxAttempts}: generating patch`,
+                });
+                const currentSelectionData = await (0, editor_service_1.getSelectionDataForDocumentRange)(documentUri, currentRange);
+                if (!currentSelectionData) {
+                    (0, notification_1.showError)("Unable to rebuild the selected code for patch generation.");
+                    return;
+                }
+                const payload = (0, request_builder_service_1.buildGeneratePatchRequest)(currentSelectionData, buildFeedback(feedback, lastFailureOutput));
+                const response = await (0, api_client_service_1.requestPatch)(payload);
+                if (!response.patches.length) {
+                    (0, notification_1.showError)("No patch candidates were returned by the backend.");
+                    return;
+                }
+                const bestPatch = response.patches[0];
+                const appliedRange = await (0, editor_service_1.applyPatchToSelection)(documentUri, currentRange, bestPatch.patchedText);
+                if (!appliedRange) {
+                    (0, notification_1.showError)("Failed to apply patch.");
+                    return;
+                }
+                currentRange = appliedRange;
+                progress.report({
+                    message: `Attempt ${attempt} of ${maxAttempts}: running tests`,
+                });
+                const testResult = await (0, test_runner_service_1.runTests)(testExecutionConfig);
+                if (testResult.passed) {
+                    (0, notification_1.showTestPass)(`Patch applied successfully and tests passed. Confidence: ${bestPatch.confidence}`, testResult.output);
+                    return;
+                }
+                lastFailureOutput = formatFailureForFeedback(testResult.output);
+                await (0, notification_1.showTestFailure)(buildFailureMessage(attempt, maxAttempts, testResult.output, testResult.exitCode), testResult.output);
+                if (attempt === maxAttempts) {
+                    (0, notification_1.showError)(`Patch applied, but tests still failed after ${maxAttempts} attempts. See test output for failure details.`);
+                    return;
+                }
+                const nextFeedback = await (0, feedback_input_1.getNaturalLanguageFeedback)({
+                    attempt: attempt + 1,
+                    testFailureOutput: lastFailureOutput,
+                });
+                if (!nextFeedback) {
+                    (0, notification_1.showError)("Patch retry cancelled after test failure.");
+                    return;
+                }
+                feedback = nextFeedback;
             }
-            const bestPatch = response.patches[0];
-            const applied = await (0, editor_service_1.applyPatchToSelection)(editor, selectionData.range, bestPatch.patchedText);
-            if (!applied) {
-                (0, notification_1.showError)("Failed to apply patch.");
-                return;
-            }
-            (0, notification_1.showInfo)(`Patch applied successfully. Confidence: ${bestPatch.confidence}`);
         }
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);

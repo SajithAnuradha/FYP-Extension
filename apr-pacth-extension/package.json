@@ -34,6 +34,22 @@
           "type": "number",
           "default": 30000,
           "description": "Timeout in milliseconds for backend requests."
+        },
+        "apr.defaultTestFilePath": {
+          "type": "string",
+          "default": "",
+          "description": "Default relative or absolute path to the test file the extension should run after applying a patch."
+        },
+        "apr.testCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Shell command used to run the tests after a patch is applied. Use {testFile} as a placeholder for the resolved test file path."
+        },
+        "apr.maxPatchAttempts": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "description": "Maximum number of patch-generation attempts, including retries after failing tests."
         }
       }
     }

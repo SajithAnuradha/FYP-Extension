@@ -34,8 +34,29 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getSelectionData = getSelectionData;
+exports.getSelectionDataForRange = getSelectionDataForRange;
+exports.getSelectionDataForDocumentRange = getSelectionDataForDocumentRange;
 exports.applyPatchToSelection = applyPatchToSelection;
 const vscode = __importStar(require("vscode"));
+function buildSelectionData(document, range, selectedText) {
+    if (!selectedText.trim()) {
+        return undefined;
+    }
+    const startLine = range.start.line;
+    const endLine = range.end.line;
+    const contextBefore = collectLines(document, Math.max(0, startLine - 3), Math.max(0, startLine - 1));
+    const contextAfter = collectLines(document, Math.min(document.lineCount - 1, endLine + 1), Math.min(document.lineCount - 1, endLine + 3));
+    return {
+        fileName: document.fileName.split(/[\\/]/).pop() ?? "unknown",
+        language: document.languageId,
+        startLine,
+        endLine,
+        selectedText,
+        contextBefore,
+        contextAfter,
+        range,
+    };
+}
 function collectLines(document, startLine, endLine) {
     if (startLine > endLine) {
         return "";
@@ -55,28 +76,26 @@ function getSelectionData(editor = vscode.window.activeTextEditor) {
     if (selection.isEmpty) {
         return undefined;
     }
-    const selectedText = document.getText(selection);
-    if (!selectedText.trim()) {
+    return getSelectionDataForRange(editor, new vscode.Range(selection.start, selection.end));
+}
+function getSelectionDataForRange(editor, range) {
+    return buildSelectionData(editor.document, range, editor.document.getText(range));
+}
+async function getSelectionDataForDocumentRange(documentUri, range) {
+    const document = await vscode.workspace.openTextDocument(documentUri);
+    return buildSelectionData(document, range, document.getText(range));
+}
+async function applyPatchToSelection(documentUri, range, patchedText) {
+    const document = await vscode.workspace.openTextDocument(documentUri);
+    const startOffset = document.offsetAt(range.start);
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(documentUri, range, patchedText);
+    const applied = await vscode.workspace.applyEdit(edit);
+    if (!applied) {
         return undefined;
     }
-    const startLine = selection.start.line;
-    const endLine = selection.end.line;
-    const contextBefore = collectLines(document, Math.max(0, startLine - 3), Math.max(0, startLine - 1));
-    const contextAfter = collectLines(document, Math.min(document.lineCount - 1, endLine + 1), Math.min(document.lineCount - 1, endLine + 3));
-    return {
-        fileName: document.fileName.split(/[\\/]/).pop() ?? "unknown",
-        language: document.languageId,
-        startLine,
-        endLine,
-        selectedText,
-        contextBefore,
-        contextAfter,
-        range: new vscode.Range(selection.start, selection.end),
-    };
-}
-async function applyPatchToSelection(editor, range, patchedText) {
-    return editor.edit((editBuilder) => {
-        editBuilder.replace(range, patchedText);
-    });
+    const updatedDocument = await vscode.workspace.openTextDocument(documentUri);
+    const endPosition = updatedDocument.positionAt(startOffset + patchedText.length);
+    return new vscode.Range(range.start, endPosition);
 }
 //# sourceMappingURL=editor.service.js.map
