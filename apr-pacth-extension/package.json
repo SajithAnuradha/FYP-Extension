@@ -1,0 +1,59 @@
+{
+  "name": "apr-pacth-extension",
+  "displayName": "apr-patch-extension",
+  "description": "APR",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.110.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "apr-pacth-extension.helloWorld",
+        "title": "Hello World"
+      },
+      {
+        "command": "apr.generatePatch",
+        "title": "Generate APR Patch"
+      }
+    ],
+    "configuration": {
+      "title": "APR Patch Extension",
+      "properties": {
+        "apr.backendUrl": {
+          "type": "string",
+          "default": "https://sajithanuradha890-fyp-fastapi-backend.hf.space",
+          "description": "The base URL of the APR backend service used to generate patches."
+        },
+        "apr.requestTimeoutMs": {
+          "type": "number",
+          "default": 30000,
+          "description": "Timeout in milliseconds for backend requests."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.19.15",
+    "@types/vscode": "^1.110.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.39.3",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1"
+  }
+}
