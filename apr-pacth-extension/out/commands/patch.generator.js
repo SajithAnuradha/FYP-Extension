@@ -163,9 +163,9 @@ async function generatePatchCommand(context) {
         }
         const bestPatch = response.patches[0];
         chat.addMessage("patch", bestPatch.patchedText);
-        if (bestPatch.explanation) {
-            chat.addMessage("assistant", `Explanation: ${bestPatch.explanation}`);
-        }
+        // if (bestPatch.explanation) {
+        //     // chat.addMessage("assistant", `Explanation: ${bestPatch.explanation}`);
+        // }
         const appliedRange = await (0, editor_service_1.applyPatchToSelection)(documentUri, currentRange, bestPatch.patchedText);
         if (!appliedRange) {
             chat.addMessage("error", "Failed to apply patch to the editor.");
