@@ -38,7 +38,7 @@ exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 const patch_generator_1 = require("./commands/patch.generator");
 function activate(context) {
-    const disposable = vscode.commands.registerCommand("apr.generatePatch", patch_generator_1.generatePatchCommand);
+    const disposable = vscode.commands.registerCommand("apr.generatePatch", () => (0, patch_generator_1.generatePatchCommand)(context));
     context.subscriptions.push(disposable);
 }
 function deactivate() { }

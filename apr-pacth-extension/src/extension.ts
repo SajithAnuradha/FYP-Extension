@@ -4,7 +4,7 @@ import { generatePatchCommand } from "./commands/patch.generator";
 export function activate(context: vscode.ExtensionContext): void {
 	const disposable = vscode.commands.registerCommand(
 		"apr.generatePatch",
-		generatePatchCommand
+		() => generatePatchCommand(context),
 	);
 
 	context.subscriptions.push(disposable);
