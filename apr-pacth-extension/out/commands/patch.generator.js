@@ -66,6 +66,24 @@ async function resolveTestPath(input, workspaceFolder) {
         return undefined;
     }
 }
+async function detectTestCommand(workspaceFolder) {
+    const root = workspaceFolder.uri.fsPath;
+    const candidates = [
+        ["pom.xml", "mvn test -Dtest=\"$(basename {testFile} .java)\""],
+        ["build.gradle", "gradle test --tests {testFile}"],
+        ["build.gradle.kts", "gradle test --tests {testFile}"],
+    ];
+    for (const [file, cmd] of candidates) {
+        try {
+            await vscode.workspace.fs.stat(vscode.Uri.file(path.join(root, file)));
+            return cmd;
+        }
+        catch {
+            // not found, try next
+        }
+    }
+    return "";
+}
 async function collectTestConfig(chat, documentUri) {
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri) ??
         vscode.workspace.workspaceFolders?.[0];
@@ -75,8 +93,9 @@ async function collectTestConfig(chat, documentUri) {
     const config = vscode.workspace.getConfiguration("apr");
     const defaultPath = config.get("defaultTestFilePath", "");
     const defaultCmd = config.get("testCommand", "");
-    const pathHint = defaultPath ? ` (default: ${defaultPath})` : "";
-    const testFileInput = await chat.waitForInput(`Optional: Enter the test file path to validate the patch${pathHint}.\nLeave empty and press Enter to skip testing and apply the patch directly.`);
+    const pathHint = defaultPath ? ` (press Enter to use default: ${defaultPath})` : "";
+    const skipNote = defaultPath ? "" : " Leave empty and press Enter to skip testing.";
+    const testFileInput = await chat.waitForInput(`Optional: Enter the test file path to validate the patch${pathHint}.${skipNote}`);
     if (testFileInput === null) {
         return undefined;
     }
@@ -89,16 +108,19 @@ async function collectTestConfig(chat, documentUri) {
         chat.addMessage("error", `Could not find test file: "${rawPath}". Proceeding without tests.`);
         return undefined;
     }
-    const cmdHint = defaultCmd ? ` (default: ${defaultCmd})` : "";
-    const commandInput = await chat.waitForInput(`Enter the test command. Use {testFile} as a placeholder${cmdHint}.\nExample: npm test -- {testFile}`);
+    const suggestedCmd = defaultCmd || (await detectTestCommand(workspaceFolder));
+    const cmdHint = defaultCmd ? ` (press Enter to use default: ${defaultCmd})` : "";
+    const commandInput = await chat.waitForInput(`Enter the test command. Use {testFile} as a placeholder${cmdHint}.\nExample: npm test -- {testFile}`, suggestedCmd);
     if (commandInput === null) {
         return undefined;
     }
     const rawCmd = commandInput || defaultCmd;
-    if (!rawCmd || !rawCmd.includes("{testFile}")) {
-        if (rawCmd) {
-            chat.addMessage("error", `Command must include {testFile}. Proceeding without tests.`);
-        }
+    if (!rawCmd) {
+        chat.addMessage("error", "No test command provided. Proceeding without tests.");
+        return undefined;
+    }
+    if (!rawCmd.includes("{testFile}")) {
+        chat.addMessage("error", `Command must include {testFile}. Proceeding without tests.`);
         return undefined;
     }
     return {
@@ -171,6 +193,7 @@ async function generatePatchCommand(context) {
         }
         currentRange = appliedRange;
         if (!testConfig) {
+            await vscode.workspace.openTextDocument(documentUri).then(doc => doc.save());
             chat.addMessage("success", "Patch applied successfully.");
             chat.setStatus("");
             return;
@@ -178,6 +201,7 @@ async function generatePatchCommand(context) {
         chat.setStatus(`Attempt ${attempt}/${maxAttempts}: running tests…`);
         const testResult = await (0, test_runner_service_1.runTests)(testConfig);
         if (testResult.passed) {
+            await vscode.workspace.openTextDocument(documentUri).then(doc => doc.save());
             chat.addMessage("success", "Tests passed! Patch applied successfully.");
             if (testResult.output) {
                 chat.addMessage("status", `Test output:\n${testResult.output}`);
@@ -192,13 +216,15 @@ async function generatePatchCommand(context) {
             chat.setStatus("");
             return;
         }
-        const nextFeedback = await chat.waitForInput(`Attempt ${attempt} failed. Describe how the next patch should change (or close this panel to cancel):`);
-        if (nextFeedback === null || !nextFeedback) {
+        const nextFeedback = await chat.waitForInput(`Attempt ${attempt} failed. Add more detail for the next attempt, or press Enter to retry with the same description (close the panel to cancel):`);
+        if (nextFeedback === null) {
             chat.addMessage("status", "Patch retry cancelled.");
             chat.setStatus("");
             return;
         }
-        currentFeedback = nextFeedback;
+        if (nextFeedback) {
+            currentFeedback = nextFeedback;
+        }
     }
     chat.setStatus("");
 }

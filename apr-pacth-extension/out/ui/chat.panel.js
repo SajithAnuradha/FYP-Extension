@@ -73,11 +73,11 @@ class ChatPanel {
      * Returns the trimmed string (may be empty if user skipped an optional field),
      * or null if the panel was closed.
      */
-    async waitForInput(prompt) {
+    async waitForInput(prompt, prefill) {
         if (prompt) {
             this.addMessage("assistant", prompt);
         }
-        this.panel.webview.postMessage({ type: "enableInput" });
+        this.panel.webview.postMessage({ type: "enableInput", prefill: prefill ?? "" });
         return new Promise((resolve) => {
             this.pendingResolve = resolve;
         });
@@ -86,9 +86,12 @@ class ChatPanel {
         if (msg.type === "userMessage" && this.pendingResolve) {
             const resolve = this.pendingResolve;
             this.pendingResolve = null;
-            this.addMessage("user", msg.text ?? "");
+            const trimmed = msg.text?.trim() ?? "";
+            if (trimmed) {
+                this.addMessage("user", trimmed);
+            }
             this.panel.webview.postMessage({ type: "disableInput" });
-            resolve(msg.text?.trim() ?? "");
+            resolve(trimmed);
         }
     }
     dispose() {
@@ -300,7 +303,9 @@ window.addEventListener('message', e => {
   else if(m.type === 'enableInput'){
     input.disabled = false; btn.disabled = false;
     hint.textContent = 'Press Enter to send · Shift+Enter for new line';
+    if(m.prefill){ input.value = m.prefill; input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 120) + 'px'; }
     input.focus();
+    if(m.prefill){ input.select(); }
   }
   else if(m.type === 'disableInput'){
     input.disabled = true; btn.disabled = true;

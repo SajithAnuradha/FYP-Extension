@@ -50,6 +50,12 @@
           "default": 3,
           "minimum": 1,
           "description": "Maximum number of patch-generation attempts, including retries after failing tests."
+        },
+        "apr.testTimeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 5000,
+          "description": "Timeout in milliseconds for the test command. The process is killed and an error is reported if the command exceeds this limit."
         }
       }
     }

@@ -45,6 +45,24 @@ async function resolveTestPath(
 	}
 }
 
+async function detectTestCommand(workspaceFolder: vscode.WorkspaceFolder): Promise<string> {
+	const root = workspaceFolder.uri.fsPath;
+	const candidates: Array<[string, string]> = [
+		["pom.xml", "mvn test -Dtest=\"$(basename {testFile} .java)\""],
+		["build.gradle", "gradle test --tests {testFile}"],
+		["build.gradle.kts", "gradle test --tests {testFile}"],
+	];
+	for (const [file, cmd] of candidates) {
+		try {
+			await vscode.workspace.fs.stat(vscode.Uri.file(path.join(root, file)));
+			return cmd;
+		} catch {
+			// not found, try next
+		}
+	}
+	return "";
+}
+
 async function collectTestConfig(
 	chat: ChatPanel,
 	documentUri: vscode.Uri,
@@ -61,9 +79,10 @@ async function collectTestConfig(
 	const defaultPath = config.get<string>("defaultTestFilePath", "");
 	const defaultCmd = config.get<string>("testCommand", "");
 
-	const pathHint = defaultPath ? ` (default: ${defaultPath})` : "";
+	const pathHint = defaultPath ? ` (press Enter to use default: ${defaultPath})` : "";
+	const skipNote = defaultPath ? "" : " Leave empty and press Enter to skip testing.";
 	const testFileInput = await chat.waitForInput(
-		`Optional: Enter the test file path to validate the patch${pathHint}.\nLeave empty and press Enter to skip testing and apply the patch directly.`,
+		`Optional: Enter the test file path to validate the patch${pathHint}.${skipNote}`,
 	);
 
 	if (testFileInput === null) {
@@ -81,9 +100,11 @@ async function collectTestConfig(
 		return undefined;
 	}
 
-	const cmdHint = defaultCmd ? ` (default: ${defaultCmd})` : "";
+	const suggestedCmd = defaultCmd || (await detectTestCommand(workspaceFolder));
+	const cmdHint = defaultCmd ? ` (press Enter to use default: ${defaultCmd})` : "";
 	const commandInput = await chat.waitForInput(
 		`Enter the test command. Use {testFile} as a placeholder${cmdHint}.\nExample: npm test -- {testFile}`,
+		suggestedCmd,
 	);
 
 	if (commandInput === null) {
@@ -91,13 +112,15 @@ async function collectTestConfig(
 	}
 
 	const rawCmd = commandInput || defaultCmd;
-	if (!rawCmd || !rawCmd.includes("{testFile}")) {
-		if (rawCmd) {
-			chat.addMessage(
-				"error",
-				`Command must include {testFile}. Proceeding without tests.`,
-			);
-		}
+	if (!rawCmd) {
+		chat.addMessage("error", "No test command provided. Proceeding without tests.");
+		return undefined;
+	}
+	if (!rawCmd.includes("{testFile}")) {
+		chat.addMessage(
+			"error",
+			`Command must include {testFile}. Proceeding without tests.`,
+		);
 		return undefined;
 	}
 
@@ -190,9 +213,6 @@ export async function generatePatchCommand(context: vscode.ExtensionContext): Pr
 
 		const bestPatch = response.patches[0];
 		chat.addMessage("patch", bestPatch.patchedText);
-		if (bestPatch.explanation) {
-			chat.addMessage("assistant", `Explanation: ${bestPatch.explanation}`);
-		}
 
 		const appliedRange = await applyPatchToSelection(
 			documentUri,
@@ -208,6 +228,7 @@ export async function generatePatchCommand(context: vscode.ExtensionContext): Pr
 		currentRange = appliedRange;
 
 		if (!testConfig) {
+			await vscode.workspace.openTextDocument(documentUri).then(doc => doc.save());
 			chat.addMessage("success", "Patch applied successfully.");
 			chat.setStatus("");
 			return;
@@ -217,6 +238,7 @@ export async function generatePatchCommand(context: vscode.ExtensionContext): Pr
 		const testResult = await runTests(testConfig);
 
 		if (testResult.passed) {
+			await vscode.workspace.openTextDocument(documentUri).then(doc => doc.save());
 			chat.addMessage("success", "Tests passed! Patch applied successfully.");
 			if (testResult.output) {
 				chat.addMessage("status", `Test output:\n${testResult.output}`);
@@ -241,14 +263,16 @@ export async function generatePatchCommand(context: vscode.ExtensionContext): Pr
 		}
 
 		const nextFeedback = await chat.waitForInput(
-			`Attempt ${attempt} failed. Describe how the next patch should change (or close this panel to cancel):`,
+			`Attempt ${attempt} failed. Add more detail for the next attempt, or press Enter to retry with the same description (close the panel to cancel):`,
 		);
-		if (nextFeedback === null || !nextFeedback) {
+		if (nextFeedback === null) {
 			chat.addMessage("status", "Patch retry cancelled.");
 			chat.setStatus("");
 			return;
 		}
-		currentFeedback = nextFeedback;
+		if (nextFeedback) {
+			currentFeedback = nextFeedback;
+		}
 	}
 
 	chat.setStatus("");

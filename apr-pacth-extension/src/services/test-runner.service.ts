@@ -120,9 +120,14 @@ export async function getTestExecutionConfig(
 	};
 }
 
+const DEFAULT_TEST_TIMEOUT_MS = 120_000;
+
 export async function runTests(
 	config: TestExecutionConfig,
 ): Promise<TestRunResult> {
+	const vsConfig = vscode.workspace.getConfiguration("apr");
+	const timeoutMs = vsConfig.get<number>("testTimeoutMs", DEFAULT_TEST_TIMEOUT_MS);
+
 	const command = config.command
 		.replaceAll("{testFile}", `"${config.resolvedTestFilePath}"`)
 		.replaceAll("{workspaceFolder}", `"${config.workspaceFolder.uri.fsPath}"`);
@@ -136,6 +141,14 @@ export async function runTests(
 
 		let stdout = "";
 		let stderr = "";
+		let settled = false;
+
+		const timer = setTimeout(() => {
+			if (settled) { return; }
+			settled = true;
+			child.kill();
+			reject(new Error(`Test command timed out after ${timeoutMs} ms.`));
+		}, timeoutMs);
 
 		child.stdout.on("data", (chunk: Buffer | string) => {
 			stdout += chunk.toString();
@@ -146,10 +159,16 @@ export async function runTests(
 		});
 
 		child.on("error", (error) => {
+			if (settled) { return; }
+			settled = true;
+			clearTimeout(timer);
 			reject(new Error(`Failed to run test command: ${error.message}`));
 		});
 
 		child.on("close", (exitCode) => {
+			if (settled) { return; }
+			settled = true;
+			clearTimeout(timer);
 			const output = trimOutput([stdout, stderr].filter(Boolean).join("\n"));
 			resolve({
 				passed: exitCode === 0,
